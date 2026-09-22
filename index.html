@@ -269,6 +269,16 @@ main{max-width:var(--maxw);margin:0 auto;padding:18px 16px 60px;}
 .mock-meta div span{display:block;font-size:22px;font-weight:750;color:var(--accent);margin-bottom:4px;text-transform:none;letter-spacing:0;}
 .btn.big{width:100%;padding:15px;font-size:16px;margin-top:4px;}
 .mock-note{font-size:13px;color:var(--text-faint);margin-top:14px !important;}
+.count-readout{text-align:center;margin:22px 0 4px;}
+.count-big{font-size:46px;font-weight:800;color:var(--accent);line-height:1;font-variant-numeric:tabular-nums;}
+.count-sub{font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.6px;margin-top:5px;}
+.count-slider{width:100%;-webkit-appearance:none;appearance:none;height:6px;border-radius:4px;background:var(--surface-3);outline:none;margin:16px 0 5px;}
+.count-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:28px;height:28px;border-radius:50%;background:var(--accent);cursor:pointer;border:3px solid var(--bg);box-shadow:0 0 0 1px var(--accent);}
+.count-slider::-moz-range-thumb{width:28px;height:28px;border-radius:50%;background:var(--accent);cursor:pointer;border:3px solid var(--bg);}
+.count-ticks{display:flex;justify-content:space-between;font-size:11px;color:var(--text-faint);}
+.count-note{font-size:12.5px;color:var(--text-faint);margin-top:16px !important;}
+.quiz-controls{margin-bottom:12px;}
+.quiz-controls .btn{padding:7px 14px;font-size:13px;}
 .opt.picked{background:var(--accent-soft);border-color:var(--accent);}
 .opt.picked .lt{background:var(--accent);color:#1a1205;}
 .qnav{display:grid;grid-template-columns:repeat(auto-fill,minmax(38px,1fr));gap:6px;margin:16px 0;}
@@ -1569,24 +1579,35 @@ function renderFlash(d,body){
 /* ---------- Practice questions ---------- */
 function renderQuiz(d,body){
   body.innerHTML='';
-  if(!state.qScore[d.id])state.qScore[d.id]={correct:0,answered:0,done:{}};
-  const sc=state.qScore[d.id];
+  if(!state.practice)state.practice={};
+  const ps=state.practice[d.id];
+  if(!ps||!ps.active){ renderQuizPicker(d,body); return; }
+
+  const total=ps.order.length;
+  const pct=ps.answered?Math.round(ps.correct/ps.answered*100):0;
   const bar=el('div','score-bar');
-  const pct=sc.answered?Math.round(sc.correct/sc.answered*100):0;
   bar.innerHTML=`
-    <div class="score-chip"><div class="n">${sc.correct}</div><div class="l">Correct</div></div>
-    <div class="score-chip"><div class="n">${sc.answered}</div><div class="l">Answered</div></div>
+    <div class="score-chip"><div class="n">${ps.correct}</div><div class="l">Correct</div></div>
+    <div class="score-chip"><div class="n">${ps.answered}/${total}</div><div class="l">Answered</div></div>
     <div class="score-chip pct"><div class="n">${pct}%</div><div class="l">Score</div></div>`;
   body.appendChild(bar);
-  const reset=el('button','btn ghost','Reset score'); reset.style.cssText='padding:7px 14px;font-size:13px;margin-bottom:14px;';
-  reset.onclick=()=>{state.qScore[d.id]={correct:0,answered:0,done:{}};renderQuiz(d,body);};
-  body.appendChild(reset);
 
-  d.questions.forEach((q,qi)=>{
+  const controls=el('div','quiz-controls');
+  const change=el('button','btn ghost','Change set / new questions');
+  change.onclick=()=>{ state.practice[d.id]={active:false}; renderQuiz(d,body); };
+  controls.appendChild(change);
+  body.appendChild(controls);
+
+  const track=el('div','progress-track');
+  track.innerHTML=`<div class="progress-fill" id="pqfill" style="width:${(ps.answered/total)*100}%"></div>`;
+  body.appendChild(track);
+
+  ps.order.forEach((qi,pos)=>{
+    const q=d.questions[qi];
     const card=el('div','q-card');
-    card.innerHTML=`<div class="q-meta"><span class="q-obj">Obj ${q.obj}</span><span class="q-num">Q${qi+1} of ${d.questions.length}</span></div><div class="q-text">${esc(q.q)}</div>`;
+    card.innerHTML=`<div class="q-meta"><span class="q-obj">Obj ${q.obj}</span><span class="q-num">Q${pos+1} of ${total}</span></div><div class="q-text">${esc(q.q)}</div>`;
     const opts=el('div','opts');
-    const already=sc.done[qi];
+    const already=ps.done[qi];
     if(!q._order)shuffleOptions(q);
     const dispOpts=q._order.map(i=>q.opts[i]);
     dispOpts.forEach((opt,oi)=>{
@@ -1610,6 +1631,58 @@ function renderQuiz(d,body){
     card.appendChild(ex);
     body.appendChild(card);
   });
+  if(ps.answered===total) showQuizDone(d,body,ps);
+}
+
+function renderQuizPicker(d,body){
+  const pool=d.questions.length;
+  const maxStep=Math.floor(pool/5)*5; // largest multiple of 5 within the pool
+  let val=Math.min(20,maxStep);
+  const head=el('div','mock-start');
+  head.innerHTML=`<p>Choose how many questions to run through from Domain ${d.n}'s pool of <b>${pool}</b>. They are picked at random with shuffled options, and you get the full explanation after each answer.</p>`;
+
+  const readout=el('div','count-readout');
+  readout.innerHTML=`<div class="count-big" id="cbig">${val}</div><div class="count-sub">questions</div>`;
+  head.appendChild(readout);
+
+  const slider=el('input','count-slider');
+  slider.type='range'; slider.min='5'; slider.max=String(maxStep); slider.step='5'; slider.value=String(val);
+  slider.setAttribute('aria-label','Number of questions');
+  slider.addEventListener('input',()=>{ val=parseInt(slider.value,10); const b=document.getElementById('cbig'); if(b)b.textContent=val; });
+  head.appendChild(slider);
+  const ticks=el('div','count-ticks'); ticks.innerHTML=`<span>5</span><span>${maxStep}</span>`; head.appendChild(ticks);
+
+  const start=el('button','btn primary big','Start'); start.style.marginTop='18px';
+  start.onclick=()=>startPractice(d,body,val);
+  head.appendChild(start);
+  const all=el('button','btn ghost','Run all '+pool+' questions'); all.style.cssText='width:100%;margin-top:10px;';
+  all.onclick=()=>startPractice(d,body,pool);
+  head.appendChild(all);
+
+  head.appendChild(el('p','count-note','Your last set for this domain is kept while you switch tabs; "Change set" starts a fresh selection.'));
+  body.appendChild(head);
+}
+
+function startPractice(d,body,n){
+  const idx=d.questions.map((_,i)=>i);
+  for(let k=idx.length-1;k>0;k--){const j=Math.floor(Math.random()*(k+1));[idx[k],idx[j]]=[idx[j],idx[k]];}
+  const order=idx.slice(0,n);
+  order.forEach(qi=>shuffleOptions(d.questions[qi]));
+  state.practice[d.id]={active:true, order, done:{}, correct:0, answered:0};
+  renderQuiz(d,body);
+}
+
+function showQuizDone(d,body,ps){
+  if(document.getElementById('quizDone'))return;
+  const total=ps.order.length; const pct=Math.round(ps.correct/total*100);
+  const done=el('div','results'); done.id='quizDone'; done.style.marginTop='18px';
+  done.innerHTML=`<div class="badge ${pct>=75?'pass':'fail'}">${pct>=75?'Set complete':'Set complete'}</div>`
+    +`<div class="result-score">${pct}%</div><div class="result-sub">${ps.correct} of ${total} correct</div>`;
+  const again=el('button','btn primary big','Run a new set'); again.style.marginTop='16px';
+  again.onclick=()=>{ state.practice[d.id]={active:false}; renderQuiz(d,body); };
+  done.appendChild(again);
+  body.appendChild(done);
+  done.scrollIntoView({behavior:'smooth'});
 }
 function shuffleOptions(q){
   const idx=q.opts.map((_,i)=>i);
@@ -1635,18 +1708,20 @@ function explainHTML(obj, e, whyArr, picked, correctIdx){
     + `<div class="why-list"><div class="why-head">Why the other options are wrong</div>${items}</div>`;
 }
 function answer(d,qi,oi,card,body){
-  const sc=state.qScore[d.id]; if(sc.done[qi]!=null)return;
-  sc.done[qi]=oi; sc.answered++; const q=d.questions[qi];
-  if(oi===q._ca)sc.correct++;
+  const ps=state.practice[d.id]; if(!ps||ps.done[qi]!=null)return;
+  ps.done[qi]=oi; ps.answered++; const q=d.questions[qi];
+  if(oi===q._ca)ps.correct++;
   const buttons=card.querySelectorAll('.opt');
   buttons.forEach((b,i)=>{b.disabled=true;if(i===q._ca)b.classList.add('correct');else if(i===oi)b.classList.add('wrong');});
   const dispWhy=q._order.map(i=>(q._w&&q._w[i])||"");
   const exEl=card.querySelector('.explain');
   exEl.innerHTML=explainHTML(q.obj,q.e,dispWhy,oi,q._ca);
   exEl.classList.add('show');
-  const sc2=state.qScore[d.id];const pct=Math.round(sc2.correct/sc2.answered*100);
+  const total=ps.order.length; const pct=Math.round(ps.correct/ps.answered*100);
   const chips=body.querySelectorAll('.score-chip .n');
-  chips[0].textContent=sc2.correct;chips[1].textContent=sc2.answered;chips[2].textContent=pct+'%';
+  if(chips.length>=3){chips[0].textContent=ps.correct;chips[1].textContent=ps.answered+'/'+total;chips[2].textContent=pct+'%';}
+  const fill=document.getElementById('pqfill'); if(fill)fill.style.width=(ps.answered/total*100)+'%';
+  if(ps.answered===total) showQuizDone(d,body,ps);
 }
 
 /* ---------- Topic breakdown ---------- */
